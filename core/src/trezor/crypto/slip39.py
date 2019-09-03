@@ -143,14 +143,14 @@ class Share:
 
     def __init__(
         self,
-        identifier: int,
-        iteration_exponent: int,
-        group_index: int,
-        group_threshold: int,
-        group_count: int,
-        index: int,
-        threshold: int,
-        share_value: bytes,
+        identifier: int = None,
+        iteration_exponent: int = None,
+        group_index: int = None,
+        group_threshold: int = None,
+        group_count: int = None,
+        index: int = None,
+        threshold: int = None,
+        share_value: bytes = None,
     ):
         self.identifier = identifier
         self.iteration_exponent = iteration_exponent
@@ -160,6 +160,82 @@ class Share:
         self.index = index
         self.threshold = threshold
         self.share_value = share_value
+
+    def from_mnemonic(self, mnemonic: str):
+        """Converts a share mnemonic to share data."""
+
+        mnemonic_data = tuple(_mnemonic_to_indices(mnemonic))
+
+        if len(mnemonic_data) < _MIN_MNEMONIC_LENGTH_WORDS:
+            raise MnemonicError(
+                "Invalid mnemonic length. The length of each mnemonic must be at least {} words.".format(
+                    _MIN_MNEMONIC_LENGTH_WORDS
+                )
+            )
+
+        padding_len = (_RADIX_BITS * (len(mnemonic_data) - _METADATA_LENGTH_WORDS)) % 16
+        if padding_len > 8:
+            raise MnemonicError("Invalid mnemonic length.")
+
+        if not _rs1024_verify_checksum(mnemonic_data):
+            raise MnemonicError("Invalid mnemonic checksum.")
+
+        id_exp_int = _int_from_indices(mnemonic_data[:_ID_EXP_LENGTH_WORDS])
+        self.identifier = id_exp_int >> _ITERATION_EXP_LENGTH_BITS
+        self.iteration_exponent = id_exp_int & ((1 << _ITERATION_EXP_LENGTH_BITS) - 1)
+        tmp = _int_from_indices(
+            mnemonic_data[_ID_EXP_LENGTH_WORDS : _ID_EXP_LENGTH_WORDS + 2]
+        )
+        self.group_index, group_threshold, group_count, self.member_index, member_threshold = _int_to_indices(
+            tmp, 5, 4
+        )
+        value_data = mnemonic_data[_ID_EXP_LENGTH_WORDS + 2 : -_CHECKSUM_LENGTH_WORDS]
+
+        if group_count < group_threshold:
+            raise MnemonicError(
+                "Invalid mnemonic. Group threshold cannot be greater than group count."
+            )
+
+        self.group_threshold = group_threshold + 1
+        self.group_count = group_count + 1
+        self.member_threshold = member_threshold + 1
+
+        value_byte_count = _bits_to_bytes(_RADIX_BITS * len(value_data) - padding_len)
+        value_int = _int_from_indices(value_data)
+        if value_data[0] >= 1 << (_RADIX_BITS - padding_len):
+            raise MnemonicError("Invalid mnemonic padding")
+        self.share_value = value_int.to_bytes(value_byte_count, "big")
+
+    def to_mnemonic(self) -> str:
+        """
+        Takes the metadata and the value to be encoded and converts it into a mnemonic words.
+        Also appends a checksum.
+        """
+
+        # TODO: check here if the values are actually present and raise otherwise
+
+        # Convert the share value from bytes to wordlist indices.
+        value_word_count = _bits_to_words(len(self.share_value) * 8)
+        value_int = int.from_bytes(self.share_value, "big")
+
+        share_data = (
+            _group_prefix(
+                self.identifier,
+                self.iteration_exponent,
+                self.group_index,
+                self.group_threshold,
+                self.group_count,
+            )
+            + (
+                (((self.group_count - 1) & 3) << 8)
+                + (self.index << 4)
+                + (self.threshold - 1),
+            )
+            + tuple(_int_to_indices(value_int, value_word_count, _RADIX_BITS))
+        )
+        checksum = _rs1024_create_checksum(share_data)
+
+        return _mnemonic_from_indices(share_data + checksum)
 
 
 def decrypt(
@@ -235,18 +311,17 @@ def generate_mnemonics_from_data(
         # Split the group's secret between shares.
         shares = _split_secret(member_threshold, member_count, group_secret)
         for member_index, value in shares:
-            group_mnemonics.append(
-                _encode_mnemonic(
-                    identifier,
-                    iteration_exponent,
-                    group_index,
-                    group_threshold,
-                    len(groups),
-                    member_index,
-                    member_threshold,
-                    value,
-                )
+            x = Share(
+                identifier,
+                iteration_exponent,
+                group_index,
+                group_threshold,
+                len(groups),
+                member_index,
+                member_threshold,
+                value,
             )
+            group_mnemonics.append(x.to_mnemonic())
         mnemonics.append(group_mnemonics)
     return mnemonics
 
@@ -287,59 +362,6 @@ def combine_mnemonics(mnemonics: List[str]) -> Tuple[int, int, bytes]:
 
     encrypted_master_secret = _recover_secret(group_threshold, group_shares)
     return (identifier, iteration_exponent, encrypted_master_secret)
-
-
-def decode_mnemonic(mnemonic: str) -> Share:
-    """Converts a share mnemonic to share data."""
-
-    mnemonic_data = tuple(_mnemonic_to_indices(mnemonic))
-
-    if len(mnemonic_data) < _MIN_MNEMONIC_LENGTH_WORDS:
-        raise MnemonicError(
-            "Invalid mnemonic length. The length of each mnemonic must be at least {} words.".format(
-                _MIN_MNEMONIC_LENGTH_WORDS
-            )
-        )
-
-    padding_len = (_RADIX_BITS * (len(mnemonic_data) - _METADATA_LENGTH_WORDS)) % 16
-    if padding_len > 8:
-        raise MnemonicError("Invalid mnemonic length.")
-
-    if not _rs1024_verify_checksum(mnemonic_data):
-        raise MnemonicError("Invalid mnemonic checksum.")
-
-    id_exp_int = _int_from_indices(mnemonic_data[:_ID_EXP_LENGTH_WORDS])
-    identifier = id_exp_int >> _ITERATION_EXP_LENGTH_BITS
-    iteration_exponent = id_exp_int & ((1 << _ITERATION_EXP_LENGTH_BITS) - 1)
-    tmp = _int_from_indices(
-        mnemonic_data[_ID_EXP_LENGTH_WORDS : _ID_EXP_LENGTH_WORDS + 2]
-    )
-    group_index, group_threshold, group_count, member_index, member_threshold = _int_to_indices(
-        tmp, 5, 4
-    )
-    value_data = mnemonic_data[_ID_EXP_LENGTH_WORDS + 2 : -_CHECKSUM_LENGTH_WORDS]
-
-    if group_count < group_threshold:
-        raise MnemonicError(
-            "Invalid mnemonic. Group threshold cannot be greater than group count."
-        )
-
-    value_byte_count = _bits_to_bytes(_RADIX_BITS * len(value_data) - padding_len)
-    value_int = _int_from_indices(value_data)
-    if value_data[0] >= 1 << (_RADIX_BITS - padding_len):
-        raise MnemonicError("Invalid mnemonic padding")
-    value = value_int.to_bytes(value_byte_count, "big")
-
-    return Share(
-        identifier,
-        iteration_exponent,
-        group_index,
-        group_threshold + 1,
-        group_count + 1,
-        member_index,
-        member_threshold + 1,
-        value,
-    )
 
 
 """
@@ -547,41 +569,6 @@ def _group_prefix(
     )
 
 
-def _encode_mnemonic(
-    identifier: int,
-    iteration_exponent: int,
-    group_index: int,  # The x coordinate of the group share.
-    group_threshold: int,  # The number of group shares needed to reconstruct the encrypted master secret.
-    group_count: int,  # The total number of groups in existence.
-    member_index: int,  # The x coordinate of the member share in the given group.
-    member_threshold: int,  # The number of member shares needed to reconstruct the group share.
-    value: bytes,  # The share value representing the y coordinates of the share.
-) -> str:
-    """
-    Takes the metadata and the value to be encoded and converts it into a mnemonic words.
-    Also appends a checksum.
-    """
-
-    # Convert the share value from bytes to wordlist indices.
-    value_word_count = _bits_to_words(len(value) * 8)
-    value_int = int.from_bytes(value, "big")
-
-    share_data = (
-        _group_prefix(
-            identifier, iteration_exponent, group_index, group_threshold, group_count
-        )
-        + (
-            (((group_count - 1) & 3) << 8)
-            + (member_index << 4)
-            + (member_threshold - 1),
-        )
-        + tuple(_int_to_indices(value_int, value_word_count, _RADIX_BITS))
-    )
-    checksum = _rs1024_create_checksum(share_data)
-
-    return _mnemonic_from_indices(share_data + checksum)
-
-
 def _decode_mnemonics(
     mnemonics: List[str]
 ) -> Tuple[int, int, int, int, MnemonicGroups]:
@@ -593,7 +580,8 @@ def _decode_mnemonics(
     # { group_index : [threshold, set_of_member_shares] }
     groups = {}  # type: MnemonicGroups
     for mnemonic in mnemonics:
-        share = decode_mnemonic(mnemonic)
+        share = Share()
+        share.from_mnemonic(mnemonic)
         identifiers.add(share.identifier)
         iteration_exponents.add(share.iteration_exponent)
         group_thresholds.add(share.group_threshold)
