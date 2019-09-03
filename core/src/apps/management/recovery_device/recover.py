@@ -11,9 +11,6 @@ class RecoveryAborted(Exception):
     pass
 
 
-_GROUP_STORAGE_OFFSET = 16
-
-
 def process_bip39(words: str) -> bytes:
     """
     Receives single mnemonic and processes it. Returns what is then stored
@@ -27,51 +24,49 @@ def process_bip39(words: str) -> bytes:
 def process_slip39(words: str) -> Optional[bytes, int, int]:
     """
     Receives single mnemonic and processes it. Returns what is then stored in storage or
-    None if more shares are needed.
+    None if more shares are needed and mnemonic's group index and member index.
     """
-    mnemonic = slip39.decode_mnemonic(words)
+    share = slip39.decode_mnemonic(words)
 
     remaining = storage.recovery.fetch_slip39_remaining_shares()
     # TODO: move this whole logic to storage
-    index_with_group_offset = (
-        mnemonic.index + mnemonic.group_index * _GROUP_STORAGE_OFFSET
-    )
+    index_with_group_offset = share.index + share.group_index * slip39.MAX_SHARE_COUNT
 
     # if this is the first share, parse and store metadata
     if not remaining:
-        storage.recovery.set_slip39_group_count(mnemonic.group_count)
-        storage.recovery.set_slip39_group_threshold(mnemonic.group_threshold)
-        storage.recovery.set_slip39_iteration_exponent(mnemonic.iteration_exponent)
-        storage.recovery.set_slip39_identifier(mnemonic.identifier)
-        storage.recovery.set_slip39_threshold(mnemonic.threshold)
+        storage.recovery.set_slip39_group_count(share.group_count)
+        storage.recovery.set_slip39_group_threshold(share.group_threshold)
+        storage.recovery.set_slip39_iteration_exponent(share.iteration_exponent)
+        storage.recovery.set_slip39_identifier(share.identifier)
+        storage.recovery.set_slip39_threshold(share.threshold)
         storage.recovery.set_slip39_remaining_shares(
-            mnemonic.threshold - 1, mnemonic.group_index
+            share.threshold - 1, share.group_index
         )
         storage.recovery_shares.set(index_with_group_offset, words)
 
-        return None, mnemonic.group_index, mnemonic.index  # we need more shares
+        return None, share.group_index, share.index  # we need more shares
 
-    if remaining[mnemonic.group_index] == 0:
+    if remaining[share.group_index] == 0:
         raise GroupThresholdReachedError()
 
     # These should be checked by UI before so it's a Runtime exception otherwise
-    if mnemonic.identifier != storage.recovery.get_slip39_identifier():
+    if share.identifier != storage.recovery.get_slip39_identifier():
         raise RuntimeError("Slip39: Share identifiers do not match")
     if storage.recovery_shares.get(index_with_group_offset):
         raise RuntimeError("Slip39: This mnemonic was already entered")
 
     remaining_for_share = (
-        storage.recovery.get_slip39_remaining_shares(mnemonic.group_index)
-        or mnemonic.threshold
+        storage.recovery.get_slip39_remaining_shares(share.group_index)
+        or share.threshold
     )
     storage.recovery.set_slip39_remaining_shares(
-        remaining_for_share - 1, mnemonic.group_index
+        remaining_for_share - 1, share.group_index
     )
-    remaining[mnemonic.group_index] = remaining_for_share - 1
+    remaining[share.group_index] = remaining_for_share - 1
     storage.recovery_shares.set(index_with_group_offset, words)
 
-    if remaining.count(0) < mnemonic.group_threshold:
-        return None, mnemonic.group_index, mnemonic.index  # we need more shares
+    if remaining.count(0) < share.group_threshold:
+        return None, share.group_index, share.index  # we need more shares
 
     if len(remaining) > 1:
         mnemonics = []
@@ -84,4 +79,4 @@ def process_slip39(words: str) -> Optional[bytes, int, int]:
         mnemonics = storage.recovery_shares.fetch()
 
     identifier, iteration_exponent, secret = slip39.combine_mnemonics(mnemonics)
-    return secret, mnemonic.group_index, mnemonic.index
+    return secret, share.group_index, share.index

@@ -136,7 +136,7 @@ MAX_SHARE_COUNT = const(16)
 DEFAULT_ITERATION_EXPONENT = const(1)
 
 
-class ParsedMnemonic:
+class Share:
     """
     Represents a single mnemonic and offers its parsed metadata.
     """
@@ -150,7 +150,7 @@ class ParsedMnemonic:
         group_count: int,
         index: int,
         threshold: int,
-        share_value: int,
+        share_value: bytes,
     ):
         self.identifier = identifier
         self.iteration_exponent = iteration_exponent
@@ -289,7 +289,7 @@ def combine_mnemonics(mnemonics: List[str]) -> Tuple[int, int, bytes]:
     return (identifier, iteration_exponent, encrypted_master_secret)
 
 
-def decode_mnemonic(mnemonic: str) -> ParsedMnemonic:
+def decode_mnemonic(mnemonic: str) -> Share:
     """Converts a share mnemonic to share data."""
 
     mnemonic_data = tuple(_mnemonic_to_indices(mnemonic))
@@ -330,7 +330,7 @@ def decode_mnemonic(mnemonic: str) -> ParsedMnemonic:
         raise MnemonicError("Invalid mnemonic padding")
     value = value_int.to_bytes(value_byte_count, "big")
 
-    return ParsedMnemonic(
+    return Share(
         identifier,
         iteration_exponent,
         group_index,
@@ -377,7 +377,7 @@ def _mnemonic_to_indices(mnemonic: str) -> Iterable[int]:
 def _rs1024_create_checksum(data: Indices) -> Indices:
     """
     This implements the checksum - a Reed-Solomon code over GF(1024) that guarantees
-    detection of any error affecting at most 3 words and has less than a 1 in 109
+    detection of any error affecting at most 3 words and has less than a 1 in 10^9
     chance of failing to detect more errors.
     """
     values = tuple(_CUSTOMIZATION_STRING) + data + _CHECKSUM_LENGTH_WORDS * (0,)
@@ -593,17 +593,17 @@ def _decode_mnemonics(
     # { group_index : [threshold, set_of_member_shares] }
     groups = {}  # type: MnemonicGroups
     for mnemonic in mnemonics:
-        mnemonic = decode_mnemonic(mnemonic)
-        identifiers.add(mnemonic.identifier)
-        iteration_exponents.add(mnemonic.iteration_exponent)
-        group_thresholds.add(mnemonic.group_threshold)
-        group_counts.add(mnemonic.group_count)
-        group = groups.setdefault(mnemonic.group_index, (mnemonic.threshold, set()))
-        if group[0] != mnemonic.threshold:
+        share = decode_mnemonic(mnemonic)
+        identifiers.add(share.identifier)
+        iteration_exponents.add(share.iteration_exponent)
+        group_thresholds.add(share.group_threshold)
+        group_counts.add(share.group_count)
+        group = groups.setdefault(share.group_index, (share.threshold, set()))
+        if group[0] != share.threshold:
             raise MnemonicError(
                 "Invalid set of mnemonics. All mnemonics in a group must have the same member threshold."
             )
-        group[1].add((mnemonic.index, mnemonic.share_value))
+        group[1].add((share.index, share.share_value))
 
     if len(identifiers) != 1 or len(iteration_exponents) != 1:
         raise MnemonicError(
