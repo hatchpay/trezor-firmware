@@ -28,6 +28,7 @@ Use the following command to see all options:
     clear-session                   Clear session (remove cached PIN, passphrase, etc.).
     cosi-commit                     Ask device to commit to CoSi signing.
     cosi-sign                       Ask device to sign using CoSi.
+    credential                      Manage resident credentials on the device.
     decrypt-keyvalue                Decrypt value by given key and path.
     disable-passphrase              Disable passphrase.
     enable-passphrase               Enable passphrase.

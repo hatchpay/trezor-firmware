@@ -54,6 +54,7 @@ from trezorlib import (
     tezos,
     tools,
     ui,
+    webauthn,
 )
 from trezorlib.client import TrezorClient
 from trezorlib.transport import enumerate_devices, get_transport
@@ -1927,6 +1928,31 @@ def binance_sign_tx(connect, address, file):
     address_n = tools.parse_path(address)
 
     return binance.sign_tx(client, address_n, json.load(file))
+
+
+#
+# WebAuthn functions
+#
+
+
+@cli.command(help="List all credentials on the device.")
+@click.pass_obj
+def webauthn_list_credentials(connect):
+    return webauthn.list_credentials(connect())
+
+
+@cli.command(help="Add the credential with the given ID.")
+@click.argument("hex_credential_id")
+@click.pass_obj
+def webauthn_add_credential(connect, hex_credential_id):
+    return webauthn.add_credential(connect(), hex_credential_id)
+
+
+@cli.command(help="Remove the credential at the given index.")
+@click.argument("index")
+@click.pass_obj
+def webauthn_remove_credential(connect, index):
+    return webauthn.remove_credential(connect(), index)
 
 
 #
