@@ -3,9 +3,10 @@ import ustruct
 import utime
 from micropython import const
 
-from trezor import config, io, log, loop, ui, utils, workflow
+from trezor import config, io, log, loop, ui, utils, wire, workflow
 from trezor.crypto import aes, der, hashlib, hmac, random
 from trezor.crypto.curve import nist256p1
+from trezor.messages import MessageType
 from trezor.ui.confirm import CONFIRMED, Confirm, ConfirmPageable, Pageable
 from trezor.ui.text import Text, text_center_trim_left, text_center_trim_right
 
@@ -461,6 +462,19 @@ def send_cmd_sync(cmd: Cmd, iface: io.HID) -> None:
 
 
 def boot(iface: io.HID) -> None:
+    wire.add(
+        MessageType.WebAuthnListResidentCredentials,
+        __name__,
+        "list_resident_credentials",
+    )
+    wire.add(
+        MessageType.WebAuthnAddResidentCredential, __name__, "add_resident_credential"
+    )
+    wire.add(
+        MessageType.WebAuthnRemoveResidentCredential,
+        __name__,
+        "remove_resident_credential",
+    )
     loop.schedule(handle_reports(iface))
 
 

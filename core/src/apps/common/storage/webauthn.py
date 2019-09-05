@@ -10,13 +10,12 @@ _RESIDENT_CREDENTIAL_START_KEY = const(1)
 _MAX_RESIDENT_CREDENTIALS = const(16)
 
 
-def get_resident_credentials(rp_id_hash: Optional[bytes]) -> List[Credential]:
+def get_resident_credentials(rp_id_hash: Optional[bytes] = None) -> List[Credential]:
     creds = []  # type: List[Credential]
-    for i in range(
-        _RESIDENT_CREDENTIAL_START_KEY,
-        _RESIDENT_CREDENTIAL_START_KEY + _MAX_RESIDENT_CREDENTIALS,
-    ):
-        stored_cred_data = common._get(common._APP_FIDO2, i)
+    for i in range(_MAX_RESIDENT_CREDENTIALS):
+        stored_cred_data = common._get(
+            common._APP_FIDO2, i + _RESIDENT_CREDENTIAL_START_KEY
+        )
         if stored_cred_data is None:
             continue
 
@@ -29,6 +28,7 @@ def get_resident_credentials(rp_id_hash: Optional[bytes]) -> List[Credential]:
 
         stored_cred = Fido2Credential.from_cred_id(stored_cred_id, stored_rp_id_hash)
         if stored_cred is not None:
+            stored_cred.index = i
             creds.append(stored_cred)
 
     return creds
@@ -76,3 +76,8 @@ def erase_resident_credentials() -> None:
         _RESIDENT_CREDENTIAL_START_KEY + _MAX_RESIDENT_CREDENTIALS,
     ):
         common._delete(common._APP_FIDO2, i)
+
+
+def erase_resident_credential(i: int) -> None:
+    if 0 <= i < _MAX_RESIDENT_CREDENTIALS:
+        common._delete(common._APP_FIDO2, i + _RESIDENT_CREDENTIAL_START_KEY)
